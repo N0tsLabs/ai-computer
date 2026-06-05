@@ -55,6 +55,54 @@ install time. If you want to rebuild the overlay locally:
 npm run build:overlay   # needs Rust + MSVC C++ Build Tools
 ```
 
+## Use it as an MCP server (recommended)
+
+The fastest way for any MCP-aware agent (Claude Desktop, Claude Code,
+Cursor, Continue…) to drive the desktop is to plug `screenpilot-mcp`
+directly into your MCP config:
+
+```jsonc
+{
+  "mcpServers": {
+    "screenpilot": {
+      "command": "npx",
+      "args": ["-y", "@n0ts123/screenpilot", "screenpilot-mcp"]
+    }
+  }
+}
+```
+
+After restart, your agent gets these tools (each is one MCP tool call,
+nothing else to wire up):
+
+| Tool | What it does |
+|---|---|
+| `snap` | Full desktop or window screenshot. Returns both JSON metadata and the inline PNG so the agent reads pixels in the same turn. |
+| `windows` | List visible top-level windows (handle, title, className, pid, rect). |
+| `focus` | Bring a window to the foreground / restore from tray. |
+| `tap` | Click at a desktop `(x, y)`. Virtual cursor flies to the target first, then the real click lands. |
+| `write` | Type Unicode text into the focused field (no IME involvement). |
+| `hotkey` | Press a chord like `ctrl+s` or `enter`. |
+| `wheel` | Mouse-wheel scroll. |
+| `drag` | Drag from one point to another, optional bezier curve. |
+| `findOnScreen` | Look up UI elements by visible text (UI Automation tree). Returns 0 hits on Qt/Electron/canvas apps — fall back to vision. |
+| `startOverlay` / `stopOverlay` | Show / hide the takeover overlay. |
+| `overlayEvent` | Push a narration card (思考/决策/error/...) onto the overlay. |
+| `where` | Current cursor + foreground window — quick sanity check. |
+
+Default ReAct loop (what your agent should do every session):
+
+1. `startOverlay({ label: "Claude · 正在 …" })` — first tool call, gives
+   the user instant visual confirmation.
+2. `windows()` → pick the handle of the app you need.
+3. `focus({ handle })` → make sure that app is in front.
+4. `snap({ handle })` → get the inline image.
+5. Read coordinates from the image, optionally narrate via
+   `overlayEvent({ kind: "custom", text: "思考", detail: "..." })`.
+6. `tap` / `write` / `hotkey` / etc.
+7. Re-snap and loop.
+8. `stopOverlay()` when done.
+
 ## Three targeting strategies — pick the cheapest that works
 
 | Strategy | When | Cost |

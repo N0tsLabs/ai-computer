@@ -43,6 +43,7 @@ const OPS = {
     })
   },
   async snap(args)         { return sp.snap(args) },
+  async _snapRegion(args)  { return sp._snapRegion(args) },
   async tap(args)          { return sp.tap(args) },
   async write(args)        { return sp.write(args.text, { delayMs: args.delayMs }) },
   async hotkey(args)       { return sp.hotkey(args.combo, args) },

@@ -47,26 +47,17 @@ function dieOnError(promise) {
 // ─── snap ────────────────────────────────────────────────────────
 prog
   .command('snap [path]')
-  .describe('Capture screen, window, or region as PNG. Always emits a viewport string for follow-up clicks.')
-  .option('--handle', 'Capture this window handle (decimal int)')
-  .option('--region', 'Capture region "x,y,width,height" (desktop coords)')
+  .describe('Capture a screenshot. Defaults to the full virtual desktop. Pass --handle to scope to one window.')
+  .option('--handle', 'Capture this window handle (decimal int). Without it, snaps every monitor.')
   .option('--max-edge', 'Long-edge limit for the output image', 1568)
-  .option('--full', 'Capture the entire virtual desktop (all monitors)')
   .option('--json', 'Emit JSON (path, viewport, dimensions)')
   .example('snap shot.png --json')
   .example('snap --handle 67890 -o app.png')
   .action((path, opts) => dieOnError((async () => {
-    let region
-    if (opts.region) {
-      const [x, y, width, height] = opts.region.split(',').map(Number)
-      region = { x, y, width, height }
-    }
     const r = await sp.snap({
       path: path || './screenpilot-shot.png',
       handle: opts.handle ? Number(opts.handle) : undefined,
-      region,
       maxEdge: Number(opts['max-edge']) || 1568,
-      fullVirtual: !!opts.full,
     })
     if (opts.json) {
       out(r, true)

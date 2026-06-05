@@ -5,14 +5,16 @@
   "type": "module",
   "bin": {
     "screenpilot": "./src/cli/bin.js",
-    "sp": "./src/cli/bin.js"
+    "sp": "./src/cli/bin.js",
+    "screenpilot-mcp": "./src/mcp/server.js"
   },
   "main": "./src/index.js",
   "exports": {
     ".": "./src/index.js",
     "./core": "./src/core/index.js",
     "./viewport": "./src/core/viewport.js",
-    "./overlay": "./src/core/overlay.js"
+    "./overlay": "./src/core/overlay.js",
+    "./mcp": "./src/mcp/server.js"
   },
   "files": [
     "src",
@@ -61,9 +63,11 @@
     "x64"
   ],
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "koffi": "^2.10.0",
     "sade": "^1.8.1",
-    "sharp": "^0.33.5"
+    "sharp": "^0.33.5",
+    "zod": "^4.4.3"
   },
   "publishConfig": {
     "access": "public"

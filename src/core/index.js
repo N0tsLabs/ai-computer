@@ -48,40 +48,54 @@ async function ensureParentDir(p) {
 }
 
 /**
- * Capture screen / window / region and write a PNG.
- * Returns { path, viewport, viewportString, width, height }.
+ * Capture a screenshot. Two modes only — fullscreen (every monitor) or a
+ * single window. We deliberately do NOT expose arbitrary region cropping
+ * to AI callers: the "guess a small rect then re-guess" loop wastes
+ * round-trips and is almost always worse than letting the model read the
+ * full image and use precise (x,y) coordinates straight from it.
+ *
+ * Internal callers that legitimately need rectangle crops (e.g. the
+ * `wechat-sidebar-ruled` debugging helper) can still call the lower-level
+ * `_snapRegion()` below.
  *
  * @param {object} opts
  * @param {string} [opts.path]    Output PNG path. Defaults to ./screenpilot-shot.png
- * @param {number} [opts.handle]  Window handle to scope capture to.
- * @param {object} [opts.region]  {x,y,width,height} desktop region.
- * @param {number} [opts.maxEdge] Long-edge cap for the output (default 1568).
- * @param {boolean}[opts.fullVirtual] Capture all monitors as one image.
+ * @param {number} [opts.handle]  Window handle to scope capture to. Without it, captures the full virtual screen.
+ * @param {number} [opts.maxEdge] Long-edge cap for the output (default 1568). Set to 0 to disable downscaling.
  */
 export async function snap({
   path = './screenpilot-shot.png',
   handle,
-  region,
   maxEdge = DEFAULT_MAX_EDGE,
-  fullVirtual = false,
 } = {}) {
   let rect
-  if (region) {
-    rect = { ...region }
-  } else if (handle) {
-    const all = w32.listWindows()
+  if (handle) {
+    const all = w32.listWindows({ visibleOnly: false })
     const win = all.find(w => w.handle === handle)
     if (!win) throw new Error(`snap: window handle ${handle} not found`)
     rect = { x: win.x, y: win.y, width: win.width, height: win.height }
-  } else if (fullVirtual) {
-    rect = w32.getVirtualScreen()
   } else {
-    rect = w32.getPrimaryScreen()
+    // Default: full virtual screen across all monitors.
+    rect = w32.getVirtualScreen()
   }
+  return _snapRegion({ path, region: rect, maxEdge })
+}
 
-  const raw = w32.captureRect(rect)
+/**
+ * Lower-level snapshot of an arbitrary desktop rectangle. Useful for tools,
+ * tests, and overlay-aware debugging — not the recommended path for AI
+ * agents, which should stick to `snap()` (full or windowed).
+ */
+export async function _snapRegion({
+  path = './screenpilot-shot.png',
+  region,
+  maxEdge = DEFAULT_MAX_EDGE,
+} = {}) {
+  if (!region) throw new Error('_snapRegion: region required')
+  const raw = w32.captureRect(region)
+  const effectiveMax = maxEdge && maxEdge > 0 ? maxEdge : Math.max(raw.width, raw.height)
   const { viewWidth, viewHeight, scale } = planViewSize(
-    { width: raw.width, height: raw.height }, maxEdge,
+    { width: raw.width, height: raw.height }, effectiveMax,
   )
   await ensureParentDir(path)
   await sharp(raw.data, {
@@ -92,17 +106,17 @@ export async function snap({
     .toFile(path)
 
   const viewport = new Viewport({
-    x: rect.x, y: rect.y,
-    width: rect.width, height: rect.height,
+    x: region.x, y: region.y,
+    width: region.width, height: region.height,
     viewWidth, viewHeight, scale,
   })
   return {
     path,
     viewport: viewport.toString(),
-    captureWidth: rect.width,
-    captureHeight: rect.height,
+    captureWidth: region.width,
+    captureHeight: region.height,
     viewWidth, viewHeight,
-    captureX: rect.x, captureY: rect.y,
+    captureX: region.x, captureY: region.y,
   }
 }
 

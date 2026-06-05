@@ -8,6 +8,32 @@
 npm install -g @n0ts123/screenpilot
 ```
 
+## Drop into your MCP-aware AI (one config line)
+
+For Claude Desktop / Claude Code / Cursor / Continue, add:
+
+```jsonc
+{
+  "mcpServers": {
+    "screenpilot": {
+      "command": "npx",
+      "args": ["-y", "@n0ts123/screenpilot", "screenpilot-mcp"]
+    }
+  }
+}
+```
+
+Or with Claude Code CLI:
+
+```bash
+claude mcp add screenpilot --scope user --transport stdio -- npx -y @n0ts123/screenpilot screenpilot-mcp
+```
+
+The AI gets `snap` / `windows` / `focus` / `tap` / `write` / `hotkey` /
+`wheel` / `drag` / `findOnScreen` / `startOverlay` / `stopOverlay` /
+`overlayEvent` / `where` as native tool calls. See [`skills/SKILL.md`](./skills/SKILL.md)
+for the full per-tool contract.
+
 ![hero](docs/hero.png)
 <!-- The hero image is what you would publish — for now run
      `node demos/visual-only.js` to see the actual overlay live. -->
