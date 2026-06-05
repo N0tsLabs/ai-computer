@@ -1,0 +1,43 @@
+# ─── Node / npm ─────────────────────────────────────────────
+node_modules/
+.npm/
+*.tgz
+.pnp.*
+yarn.lock
+pnpm-lock.yaml
+
+# ─── Rust / Cargo ───────────────────────────────────────────
+# The Tauri target dir is enormous (~3 GB) and per-machine.
+overlay/src-tauri/target/
+overlay/src-tauri/Cargo.lock
+
+# Tauri-generated capability schemas — regenerated on every build.
+overlay/src-tauri/gen/
+
+# ─── Build artefacts ────────────────────────────────────────
+# We DO commit bin/<platform>/screenpilot-overlay.exe (the published
+# binary), but ignore everything else inside bin/ that's incidental.
+bin/*.log
+bin/*.tmp
+
+# ─── Editor / OS noise ──────────────────────────────────────
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*.swo
+
+# ─── Local screenshots from demos ───────────────────────────
+demos/*.png
+!demos/.gitkeep
+
+# ─── OMC / Claude tooling local state ───────────────────────
+.omc/
+.claude/
+
+# ─── Project-local secrets / env ────────────────────────────
+.env
+.env.*
+!.env.example

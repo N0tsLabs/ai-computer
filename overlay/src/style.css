@@ -1,0 +1,410 @@
+/* screenpilot overlay v0.2 — refined visual contract.
+ *
+ * Layout (z-order high→low):
+ *   1. Top centre status pill                — "AI 接管中  · 长按 Esc 收回"
+ *   2. Bottom-centre event feed              — last 5 actions, fade-out
+ *   3. Virtual cursor + click ripple          — tracks AI inputs
+ *   4. Edge breathing glow (10px hairline)   — perimeter only, not 140px
+ *   5. Esc long-press progress arc           — appears under pill while held
+ *
+ * Painting strategy: only the 10px-thick perimeter band paints any pixels
+ * around the edges. Everything else is opaque elements floating over a
+ * fully transparent body, which lets the desktop show through with zero
+ * tint and zero perceived "darkening".
+ *
+ * Inputs (driven by JS via window.postMessage from Rust):
+ *   { type: 'event', kind, text, x?, y?, fromX?, fromY?, toX?, toY? }
+ *   kind ∈ { click, double-click, right-click, drag, type, hotkey, snap, scroll, custom }
+ */
+
+:root {
+  --hue: 195;
+  --accent: hsla(var(--hue) 90% 65% / 1);
+  --accent-soft: hsla(var(--hue) 90% 60% / 0.55);
+  --metal: hsla(0 0% 100% / 0.9);
+  --pill-bg: hsla(220 18% 8% / 0.72);
+  --pill-border: hsla(0 0% 100% / 0.12);
+  --pill-hint: hsla(0 0% 100% / 0.55);
+  --card-bg: hsla(220 18% 8% / 0.62);
+  --card-border: hsla(0 0% 100% / 0.08);
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 100vw;
+  height: 100vh;
+  /* Near-transparent backdrop keeps WebView2 actively pushing frames.
+     Pure `transparent` can cause the compositor to skip paints. */
+  background: rgba(0, 0, 0, 0.001);
+  overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Microsoft YaHei", Roboto, sans-serif;
+  pointer-events: none;
+  -webkit-user-select: none;
+  user-select: none;
+  cursor: none;
+}
+
+/* ───── Edge glow — multi-layer breathing perimeter ───────────── */
+/*
+ * Recipe: three stacked layers per edge.
+ *   .edge (the strong inner glow band, 18-24px, blurred 4-8px)
+ *   .edge::before (faint outer aura, 60px, heavily blurred → soft falloff)
+ *   .edge::after (sharp 1.5px hairline at the very edge → defines silhouette)
+ * All three breathe together but with different opacity ranges so the
+ * effect reads as luminous depth rather than a single flat ring.
+ */
+
+.edge {
+  position: fixed;
+  pointer-events: none;
+  mix-blend-mode: screen;
+  filter: blur(6px);
+  animation: breathe-main 3.4s ease-in-out infinite;
+  z-index: 5;
+}
+.edge::before, .edge::after {
+  content: "";
+  position: absolute;
+  pointer-events: none;
+}
+.edge::before {
+  /* Wide soft aura that bleeds outward / inward, 60px reach */
+  inset: -50px;
+  filter: blur(28px);
+  opacity: 0.7;
+  animation: breathe-aura 3.4s ease-in-out infinite;
+}
+.edge::after {
+  /* Razor-sharp hairline flush against the screen edge */
+  inset: 0;
+  background: hsla(var(--hue) 100% 85% / 0.9);
+  filter: blur(0.5px);
+  animation: breathe-hairline 3.4s ease-in-out infinite;
+}
+
+.edge--top {
+  top: 0; left: 0; right: 0; height: 22px;
+  background: linear-gradient(180deg,
+    hsla(var(--hue) 100% 70% / 0.95) 0%,
+    hsla(var(--hue) 95% 60% / 0.7) 35%,
+    hsla(var(--hue) 80% 50% / 0.25) 75%,
+    transparent 100%);
+  animation-delay: 0s;
+}
+.edge--top::before {
+  inset: -50px 0 0 0;
+  height: 80px;
+  background: linear-gradient(180deg,
+    hsla(var(--hue) 100% 65% / 0.85) 0%,
+    hsla(var(--hue) 95% 55% / 0.4) 60%,
+    transparent 100%);
+}
+.edge--top::after { top: 0; left: 0; right: 0; height: 1.5px; }
+
+.edge--bottom {
+  bottom: 0; left: 0; right: 0; height: 22px;
+  background: linear-gradient(0deg,
+    hsla(var(--hue) 100% 70% / 0.95) 0%,
+    hsla(var(--hue) 95% 60% / 0.7) 35%,
+    hsla(var(--hue) 80% 50% / 0.25) 75%,
+    transparent 100%);
+  animation-delay: -1.7s;
+}
+.edge--bottom::before {
+  inset: 0 0 -50px 0;
+  height: 80px;
+  background: linear-gradient(0deg,
+    hsla(var(--hue) 100% 65% / 0.85) 0%,
+    hsla(var(--hue) 95% 55% / 0.4) 60%,
+    transparent 100%);
+}
+.edge--bottom::after { bottom: 0; left: 0; right: 0; height: 1.5px; }
+
+.edge--left {
+  top: 0; bottom: 0; left: 0; width: 22px;
+  background: linear-gradient(90deg,
+    hsla(var(--hue) 100% 70% / 0.95) 0%,
+    hsla(var(--hue) 95% 60% / 0.7) 35%,
+    hsla(var(--hue) 80% 50% / 0.25) 75%,
+    transparent 100%);
+  animation-delay: -0.85s;
+}
+.edge--left::before {
+  inset: 0 0 0 -50px;
+  width: 80px;
+  background: linear-gradient(90deg,
+    hsla(var(--hue) 100% 65% / 0.85) 0%,
+    hsla(var(--hue) 95% 55% / 0.4) 60%,
+    transparent 100%);
+}
+.edge--left::after { top: 0; bottom: 0; left: 0; width: 1.5px; height: auto; background: hsla(var(--hue) 100% 85% / 0.9); }
+
+.edge--right {
+  top: 0; bottom: 0; right: 0; width: 22px;
+  background: linear-gradient(270deg,
+    hsla(var(--hue) 100% 70% / 0.95) 0%,
+    hsla(var(--hue) 95% 60% / 0.7) 35%,
+    hsla(var(--hue) 80% 50% / 0.25) 75%,
+    transparent 100%);
+  animation-delay: -2.55s;
+}
+.edge--right::before {
+  inset: 0 -50px 0 0;
+  width: 80px;
+  background: linear-gradient(270deg,
+    hsla(var(--hue) 100% 65% / 0.85) 0%,
+    hsla(var(--hue) 95% 55% / 0.4) 60%,
+    transparent 100%);
+}
+.edge--right::after { top: 0; bottom: 0; right: 0; width: 1.5px; height: auto; background: hsla(var(--hue) 100% 85% / 0.9); }
+
+/* Big amplitude so the breathing reads as a clear pulse, not a flicker. */
+@keyframes breathe-main {
+  0%, 100% { opacity: 0.35; filter: blur(8px) brightness(0.85); }
+  50%      { opacity: 1.00; filter: blur(4px) brightness(1.20); }
+}
+@keyframes breathe-aura {
+  0%, 100% { opacity: 0.20; transform: scale(0.94); }
+  50%      { opacity: 0.85; transform: scale(1.04); }
+}
+@keyframes breathe-hairline {
+  0%, 100% { opacity: 0.55; }
+  50%      { opacity: 1.00; }
+}
+
+/* Replace the old single hairline border with a richer corner highlight. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 6;
+  /* Four glowing corner dots reinforce the "framed" feeling. */
+  background:
+    radial-gradient(circle at top    left,  hsla(var(--hue) 100% 85% / 0.55) 0, transparent 90px),
+    radial-gradient(circle at top    right, hsla(var(--hue) 100% 85% / 0.55) 0, transparent 90px),
+    radial-gradient(circle at bottom left,  hsla(var(--hue) 100% 85% / 0.55) 0, transparent 90px),
+    radial-gradient(circle at bottom right, hsla(var(--hue) 100% 85% / 0.55) 0, transparent 90px);
+  mix-blend-mode: screen;
+  animation: corner-pulse 3.4s ease-in-out infinite;
+}
+@keyframes corner-pulse {
+  0%, 100% { opacity: 0.4; }
+  50%      { opacity: 1.0; }
+}
+
+/* ───── Status pill ───────────────────────────────────────────── */
+
+.pill {
+  position: fixed;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 9px 16px 9px 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--pill-bg);
+  backdrop-filter: blur(14px) saturate(140%);
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
+  border: 1px solid var(--pill-border);
+  border-radius: 999px;
+  box-shadow:
+    0 8px 32px hsla(220 50% 4% / 0.45),
+    0 0 0 1px hsla(var(--hue) 90% 70% / 0.15),
+    inset 0 1px 0 hsla(0 0% 100% / 0.07);
+  color: var(--metal);
+  font-size: 13px;
+  letter-spacing: 0.02em;
+  line-height: 1;
+  white-space: nowrap;
+  animation: pill-in 380ms cubic-bezier(0.2, 1.2, 0.3, 1) both;
+  overflow: hidden;
+}
+@keyframes pill-in {
+  from { opacity: 0; transform: translate(-50%, -8px) scale(0.96); }
+  to   { opacity: 1; transform: translate(-50%, 0)    scale(1); }
+}
+.pill__dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: radial-gradient(circle, hsla(var(--hue) 100% 80% / 1) 0%, hsla(var(--hue) 90% 55% / 1) 80%);
+  box-shadow: 0 0 10px hsla(var(--hue) 100% 65% / 0.9);
+  animation: dot-pulse 1.4s ease-in-out infinite;
+}
+@keyframes dot-pulse {
+  0%, 100% { transform: scale(1);    opacity: 1; }
+  50%      { transform: scale(1.35); opacity: 0.7; }
+}
+.pill__text { font-weight: 600; }
+.pill__hint { color: var(--pill-hint); font-weight: 400; font-size: 12px; margin-left: 2px; }
+
+/* Esc long-press progress fills the pill background from left to right. */
+.pill__progress {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg,
+    hsla(0 80% 60% / 0.45) 0%, hsla(0 80% 60% / 0.35) 100%);
+  transform: scaleX(var(--p, 0));
+  transform-origin: left center;
+  transition: transform 60ms linear;
+  pointer-events: none;
+}
+
+/* Virtual cursor — readable size with a steady halo (no orbiting pulse).
+ * Tech-feel comes from a calm, persistent glow rather than animation. */
+.vcursor {
+  position: fixed;
+  top: 0; left: 0;
+  width: 36px; height: 36px;
+  pointer-events: none;
+  /* The arrow's visual "hotspot" is at the tip — roughly (4, 4) inside our
+   * 24x24 SVG viewBox, i.e. ~17% from the top-left corner of the 36x36 box.
+   * Anchor the element at (0, 0) of its own box so the arrow tip lands on
+   * the target coordinate, matching native OS cursor behaviour. */
+  transform: translate(-6px, -4px);
+  transition: left 260ms cubic-bezier(0.45, 0.05, 0.2, 1),
+              top  260ms cubic-bezier(0.45, 0.05, 0.2, 1);
+  z-index: 50;
+  filter:
+    drop-shadow(0 0 4px hsla(var(--hue) 100% 80% / 0.7))
+    drop-shadow(0 0 14px hsla(var(--hue) 100% 60% / 0.55))
+    drop-shadow(0 2px 4px hsla(220 90% 4% / 0.6));
+}
+.vcursor svg { width: 100%; height: 100%; display: block; }
+.vcursor[data-mode="drag"]  { transform: translate(-6px, -4px) scale(1.15); transform-origin: 6px 4px; }
+.vcursor[data-mode="type"]  { opacity: 0.65; }
+
+/* Steady halo centred on the arrow tip (not the box centre). */
+.vcursor::before {
+  content: "";
+  position: absolute;
+  /* Centre a 48x48 halo on the arrow tip at (6, 4) within the 36x36 box. */
+  left: 6px;
+  top: 4px;
+  width: 48px;
+  height: 48px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: radial-gradient(circle,
+    hsla(var(--hue) 100% 70% / 0.35) 0%,
+    hsla(var(--hue) 100% 60% / 0.14) 50%,
+    transparent 75%);
+  filter: blur(2px);
+  pointer-events: none;
+  z-index: -1;
+}
+
+/* Click ripples are short-lived siblings of the cursor. */
+.ripple {
+  position: fixed;
+  top: 0; left: 0;
+  width: 16px; height: 16px;
+  border: 2px solid hsla(var(--hue) 100% 80% / 0.9);
+  background: hsla(var(--hue) 100% 80% / 0.18);
+  border-radius: 50%;
+  transform: translate(-50%, -50%) scale(0.4);
+  pointer-events: none;
+  animation: ripple-out 600ms cubic-bezier(0.2, 0.7, 0.2, 1) forwards;
+  z-index: 49;
+}
+@keyframes ripple-out {
+  0%   { opacity: 0.95; transform: translate(-50%, -50%) scale(0.4); }
+  100% { opacity: 0;    transform: translate(-50%, -50%) scale(3.5); }
+}
+.ripple--right  { border-color: hsla(35  100% 70% / 0.95); background: hsla(35  100% 70% / 0.18); }
+.ripple--double { border-color: hsla(280 100% 80% / 0.95); background: hsla(280 100% 80% / 0.18); }
+
+/* Drag trail — drawn as a row of fading dots between from→to. */
+.trail-dot {
+  position: fixed;
+  top: 0; left: 0;
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: hsla(var(--hue) 100% 75% / 0.85);
+  box-shadow: 0 0 10px hsla(var(--hue) 100% 65% / 0.7);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  animation: trail-fade 900ms ease-out forwards;
+  z-index: 48;
+}
+@keyframes trail-fade {
+  0%   { opacity: 0.95; }
+  100% { opacity: 0; transform: translate(-50%, -50%) scale(0.4); }
+}
+
+/* ───── Event feed (bottom-centre cards) ──────────────────────── */
+
+.feed {
+  position: fixed;
+  bottom: 80px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  max-width: 720px;
+  width: max-content;
+  pointer-events: none;
+  z-index: 60;
+}
+.feed__card {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  background: var(--card-bg);
+  backdrop-filter: blur(14px) saturate(140%);
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
+  border: 1px solid var(--card-border);
+  border-radius: 12px;
+  box-shadow:
+    0 10px 36px hsla(220 50% 4% / 0.5),
+    inset 0 1px 0 hsla(0 0% 100% / 0.05);
+  color: var(--metal);
+  font-size: 13px;
+  line-height: 1.25;
+  white-space: nowrap;
+  max-width: 720px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  animation: card-in 320ms cubic-bezier(0.2, 1.2, 0.3, 1) both,
+             card-fade 5500ms 4800ms ease-out forwards;
+}
+@keyframes card-in {
+  from { opacity: 0; transform: translateY(12px) scale(0.96); }
+  to   { opacity: 1; transform: translateY(0)    scale(1); }
+}
+@keyframes card-fade {
+  to { opacity: 0; transform: translateY(-12px) scale(0.96); }
+}
+.feed__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px; height: 22px;
+  border-radius: 50%;
+  background: hsla(var(--hue) 100% 60% / 0.22);
+  color: hsla(var(--hue) 100% 85% / 1);
+  font-size: 12px;
+  font-weight: 700;
+}
+.feed__card[data-kind="hotkey"] .feed__icon { background: hsla(45 100% 60% / 0.22); color: hsla(45 100% 85% / 1); }
+.feed__card[data-kind="type"]   .feed__icon { background: hsla(150 70% 55% / 0.22); color: hsla(150 90% 85% / 1); }
+.feed__card[data-kind="drag"]   .feed__icon { background: hsla(280 70% 65% / 0.22); color: hsla(280 90% 85% / 1); }
+.feed__card[data-kind="snap"]   .feed__icon { background: hsla(0 0% 100% / 0.14);   color: hsla(0 0% 100% / 1); }
+.feed__card[data-kind="error"]  .feed__icon { background: hsla(0 80% 60% / 0.28);   color: hsla(0 95% 85% / 1); }
+.feed__detail {
+  color: hsla(0 0% 100% / 0.6);
+  font-weight: 400;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .edge { animation: none; opacity: 0.7; }
+  .vcursor { transition: none; }
+  .ripple, .trail-dot { animation-duration: 1ms; }
+}

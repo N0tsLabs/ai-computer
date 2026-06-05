@@ -1,0 +1,79 @@
+{
+  "name": "@n0ts123/screenpilot",
+  "version": "0.0.1",
+  "description": "Semantic desktop automation for vision LLMs — point by what you see, with a beautiful takeover overlay (glow, virtual cursor, action log).",
+  "type": "module",
+  "bin": {
+    "screenpilot": "./src/cli/bin.js",
+    "sp": "./src/cli/bin.js"
+  },
+  "main": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./core": "./src/core/index.js",
+    "./viewport": "./src/core/viewport.js",
+    "./overlay": "./src/core/overlay.js"
+  },
+  "files": [
+    "src",
+    "skills",
+    "bin",
+    "scripts/check-toolchain.js",
+    "scripts/install-overlay.js",
+    "scripts/postinstall.js",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "node --test test/",
+    "check": "node scripts/check-toolchain.js",
+    "demo:notepad": "node demos/notepad.js",
+    "demo:showcase": "node demos/showcase.js",
+    "demo:visual": "node demos/visual-only.js",
+    "demo:aim": "node demos/aim-hold.js",
+    "build:overlay": "powershell -NoProfile -Command \"Set-Location overlay/src-tauri; cargo build --release\" && node scripts/install-overlay.js",
+    "build:overlay:debug": "powershell -NoProfile -Command \"Set-Location overlay/src-tauri; cargo build\"",
+    "postinstall": "node scripts/postinstall.js || true"
+  },
+  "keywords": [
+    "computer-use",
+    "vision-llm",
+    "desktop-automation",
+    "screen-control",
+    "uiautomation",
+    "ai-agent",
+    "claude",
+    "gpt-4-vision",
+    "windows-automation",
+    "semantic-ui",
+    "ai-overlay",
+    "takeover-ui"
+  ],
+  "author": "N0ts <mail@n0ts.top>",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "os": [
+    "win32"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "dependencies": {
+    "koffi": "^2.10.0",
+    "sade": "^1.8.1",
+    "sharp": "^0.33.5"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/N0tsLabs/ai-computer.git"
+  },
+  "homepage": "https://github.com/N0tsLabs/ai-computer#readme",
+  "bugs": {
+    "url": "https://github.com/N0tsLabs/ai-computer/issues"
+  }
+}

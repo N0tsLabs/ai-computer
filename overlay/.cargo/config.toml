@@ -1,0 +1,9 @@
+# overlay/.cargo/config.toml — speed up incremental builds.
+#
+# Earlier revisions added `rustflags = ["-C", "link-arg=/MANIFEST:EMBED"]`,
+# but tauri-build already emits a Windows manifest via its build.rs, so the
+# duplicate triggered `CVT1100: resource duplicated, type MANIFEST`. Now we
+# rely on tauri-build alone.
+
+[registries.crates-io]
+protocol = "sparse"
