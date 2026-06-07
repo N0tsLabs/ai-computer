@@ -6,6 +6,10 @@
 // each pinned to that monitor's bounds, all driven by the same stdin event
 // stream. The first ("main") window is declared in tauri.conf.json; extra
 // monitors get programmatically-built siblings labelled "monitor-N".
+//
+// Global Esc key is registered via tauri-plugin-global-shortcut, with a
+// recovery path on startup that unregisters any stale binding from a
+// previous crashed session before re-registering.
 
 use std::io::{self, BufRead, Write};
 use std::sync::{Mutex, OnceLock};
@@ -29,12 +33,17 @@ fn get_handle() -> Option<tauri::AppHandle> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .plugin(build_global_esc_plugin())
+        // The plugin is registered (initialised) but we don't auto-register
+        // any shortcut via the builder; we register inside setup() AFTER
+        // unregistering any stale hotkey from a previous crashed session.
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .setup(|app| {
+            register_esc_with_recovery(app.handle().clone());
             store_handle(app.handle().clone());
 
-            // Configure the main window (covers the primary monitor) and
-            // spawn extra windows for every other monitor.
+            // Configure the main window (primary monitor) and spawn an
+            // extra window for every other monitor so the overlay spans
+            // the whole virtual desktop.
             let main = app.get_webview_window("main")
                 .ok_or("main webview window missing from config")?;
             let monitors = main.available_monitors().unwrap_or_default();
@@ -51,7 +60,6 @@ pub fn run() {
                 if i == 0 {
                     configure_overlay_window(&main, pos, size)?;
                 } else {
-                    // Build a fresh transparent webview pinned to monitor i.
                     let label = format!("monitor-{i}");
                     let win = WebviewWindowBuilder::new(
                         app.handle(),
@@ -64,7 +72,7 @@ pub fn run() {
                     .always_on_top(true)
                     .skip_taskbar(true)
                     .resizable(false)
-                    .visible(false)            // show after sizing
+                    .visible(false)
                     .shadow(false)
                     .focused(false)
                     .build()?;
@@ -87,6 +95,29 @@ pub fn run() {
         .expect("error while running screenpilot-overlay");
 }
 
+/// Register Esc globally, first clearing any stale binding from a
+/// previous run that crashed before unregistering.
+fn register_esc_with_recovery(app: tauri::AppHandle) {
+    use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Shortcut, ShortcutState};
+
+    let esc = Shortcut::new(None, Code::Escape);
+
+    if let Err(e) = app.global_shortcut().unregister(esc) {
+        eprintln!("[overlay] unregister: {} (continuing)", e);
+    }
+
+    if let Err(e) = app.global_shortcut().on_shortcut(esc, move |_app, _shortcut, event| {
+        if event.state() == ShortcutState::Pressed {
+            eprintln!("[overlay] global Esc pressed → user_abort");
+            user_abort();
+        }
+    }) {
+        eprintln!("[overlay] register Esc failed: {}", e);
+    } else {
+        eprintln!("[overlay] global Esc registered");
+    }
+}
+
 #[tauri::command]
 fn label_text() -> String {
     std::env::args()
@@ -95,6 +126,7 @@ fn label_text() -> String {
         .unwrap_or_else(|| "AI 接管中".to_string())
 }
 
+/// Invoked from the WebView when the user completes the Esc long-press.
 #[tauri::command]
 fn user_abort() {
     stdout_event("aborted", r#"{"by":"user"}"#);
@@ -121,10 +153,6 @@ fn configure_overlay_window(
     let _ = win.set_ignore_cursor_events(true);
     let _ = win.show();
 
-    // Inject this window's physical-pixel viewport so the WebView can map
-    // incoming desktop coordinates → local CSS pixels without relying on
-    // `window.screenX/screenY`, which Chromium reports in DPI-scaled logical
-    // pixels and is unreliable across multi-DPI monitor setups.
     let scale = win.scale_factor().unwrap_or(1.0);
     let init_script = format!(
         "window.__SP_VIEWPORT__ = {{ x:{}, y:{}, w:{}, h:{}, scale:{} }};",
@@ -182,9 +210,6 @@ fn spawn_stdin_watcher() {
     });
 }
 
-/// Push an event JSON string into EVERY overlay window's __SP_EVENT__ bridge.
-/// Coordinates in the event are in *desktop* space — each WebView translates
-/// them to its own viewport in main.js (subtracting window.screenX/screenY).
 fn broadcast_to_webviews(json_line: &str) {
     let Some(h) = get_handle() else { return; };
     let escaped = json_line
@@ -204,24 +229,4 @@ fn stdout_event(kind: &str, payload_json: &str) {
     let mut out = io::stdout().lock();
     let _ = out.write_all(line.as_bytes());
     let _ = out.flush();
-}
-
-/// Build the global-shortcut plugin so that ANY Escape press triggers
-/// user_abort, even when keyboard focus is elsewhere (e.g. the user is
-/// typing into the app being driven, or the click-through overlay is
-/// unable to receive its own keydowns).
-fn build_global_esc_plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
-    use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Shortcut, ShortcutState};
-
-    let esc = Shortcut::new(None, Code::Escape);
-    tauri_plugin_global_shortcut::Builder::new()
-        .with_handler(move |_app, shortcut, event| {
-            if shortcut == &esc && event.state() == ShortcutState::Pressed {
-                eprintln!("[overlay] global Esc pressed → user_abort");
-                user_abort();
-            }
-        })
-        .with_shortcuts([esc])
-        .expect("failed to register Esc")
-        .build()
 }
